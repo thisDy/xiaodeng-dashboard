@@ -250,21 +250,21 @@ label.lbl{display:block;font-size:11.5px;color:var(--ink-sub);margin:10px 0 5px}
     </div>
 
     <div class="sync-opt">
-      <b>☁️ 自动云同步（需 Gitee 账号，一次性配置）</b>
-      <p>填入 Gitee 私人令牌与仓库名后，手机和电脑打开页面会自动读写同一份云端数据，实现「无感自动同步」。</p>
+      <b>☁️ 自动云同步（已为你建好私有仓库，只差填 token）</b>
+      <p>我已在你 Gitee 账号下创建好私有仓库 <code>githubthisDy/xiaodeng-dashboard-sync</code>。填入你的 Gitee 私人令牌并点「保存」，手机和电脑打开页面就会自动读写同一份云端数据，实现无感同步。</p>
       <div class="row">
-        <input type="text" id="giteeToken" placeholder="Gitee 私人令牌 (token)" style="flex:2">
-        <input type="text" id="giteeRepo" placeholder="仓库名，如 用户名/工作台数据" style="flex:1">
+        <input type="password" id="giteeToken" placeholder="Gitee 私人令牌 (token)" style="flex:2">
+        <input type="text" id="giteeRepo" placeholder="仓库名" value="githubthisDy/xiaodeng-dashboard-sync" style="flex:1">
       </div>
       <div class="row mt-10">
-        <button class="btn btn-blue" onclick="saveGiteeConfig()">💾 保存云同步配置</button>
+        <button class="btn btn-blue" onclick="saveGiteeConfig()">💾 保存并测试</button>
         <button class="btn btn-soft" onclick="testGitee()">🔍 测试连接</button>
         <button class="btn btn-danger" onclick="clearGitee()">移除配置</button>
       </div>
       <div class="sync-status" id="giteeStatus"></div>
     </div>
 
-    <div class="muted" style="font-size:11px;line-height:1.6">提示：云同步把数据存放在 Gitee 私有仓库中，仅你（拥有令牌的人）可读写。也可把令牌视作隐私信息妥善保管。</div>
+    <div class="muted" style="font-size:11px;line-height:1.6">提示：云同步把数据存放在你自己的 Gitee 私有仓库中，仅持有令牌的人可读写。令牌只存于你自己的浏览器，不会上传到 GitHub 公开代码。</div>
   </div>
 </div>
 <script>
@@ -327,7 +327,7 @@ function load(){
   try{const raw=localStorage.getItem(KEY);if(raw){const d=JSON.parse(raw);if(d&&d.version===2){state=d;return;}}}catch(e){}
   state=defaultData();save();
 }
-function save(){try{localStorage.setItem(KEY,JSON.stringify(state));}catch(e){toast('存储失败：空间不足');}}
+function save(){try{localStorage.setItem(KEY,JSON.stringify(state));}catch(e){toast('存储失败：空间不足');}scheduleCloudPush();}
 
 /* ================= 侧边栏 & 路由 ================= */
 const NAV=[
@@ -928,6 +928,33 @@ function mergeData(cur,incoming){
 }
 
 /* Gitee 云同步 */
+let _pushTimer=null;
+function scheduleCloudPush(){
+  clearTimeout(_pushTimer);
+  _pushTimer=setTimeout(()=>{
+    const token=giteeToken(),repo=giteeBase();
+    if(!token||!repo)return;
+    // 推送前先拉最新远端数据合并，避免覆盖对方设备的新记录
+    fetch('https://gitee.com/api/v5/repos/'+encodeURIComponent(repo)+'/contents/xiaodeng-data.json?access_token='+encodeURIComponent(token))
+      .then(r=>r.json())
+      .then(j=>{
+        if(j&&j.content&&j.sha){
+          let remote;
+          try{remote=JSON.parse(atob(j.content));}catch(e){remote=null;}
+          if(remote){
+            // 以本地为基准合并远端（本地刚改过），保留两边数据
+            const merged=mergeData(state,remote&&remote.data||remote);
+            state=merged;saveLocal();
+          }
+          pushToGitee(j.sha,true);
+        }else{
+          pushToGitee('',true);
+        }
+      })
+      .catch(()=>{});
+  },600);
+}
+function saveLocal(){try{localStorage.setItem(KEY,JSON.stringify(state));}catch(e){}}
 function saveGiteeConfig(){
   const token=$('#giteeToken').value.trim();
   const repo=$('#giteeRepo').value.trim();
@@ -942,10 +969,10 @@ function testGitee(showSave){
     .then(r=>r.json())
     .then(j=>{
       if(j&&j.content){
-        syncStatus('连接成功！云端已有数据，可点「立即同步」读取',false);
+        syncStatus('连接成功！云端已有数据，页面会自动合并同步',false);
         if(showSave)setSyncCfg({token,repo});
-      }else if(j&&j.message&&j.message.includes('404')){
-        syncStatus('连接成功（云端暂无数据，保存时自动创建）',false);
+      }else if(j&&j.message&&String(j.message).includes('404')){
+        syncStatus('连接成功！云端暂无数据，首次编辑将自动创建',false);
         if(showSave)setSyncCfg({token,repo});
       }else{
         syncStatus('连接失败：'+(j.message||'未知错误'),true);
@@ -955,11 +982,10 @@ function testGitee(showSave){
 }
 function clearGitee(){localStorage.removeItem(SYNC_KEY);syncStatus('已移除云同步配置',false);}
 
-/* 自动云同步：页面加载时尝试拉取远端数据合并 */
+/* 自动云同步：页面加载时拉取远端数据合并到本地 */
 function autoCloudSync(){
   const token=giteeToken(),repo=giteeBase();
   if(!token||!repo)return;
-  // 读远端
   fetch('https://gitee.com/api/v5/repos/'+encodeURIComponent(repo)+'/contents/xiaodeng-data.json?access_token='+encodeURIComponent(token))
     .then(r=>r.json())
     .then(j=>{
@@ -967,8 +993,8 @@ function autoCloudSync(){
         let remote;
         try{remote=JSON.parse(atob(j.content));}catch(e){return;}
         const merged=mergeData(state,remote&&remote.data||remote);
-        state=merged;save();render();
-        // 回写合并结果到远端
+        state=merged;saveLocal();render();
+        // 回写合并结果，保证两端一致
         pushToGitee(j.sha,true);
       }
     }).catch(()=>{});
