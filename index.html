@@ -323,11 +323,12 @@ function defaultData(){
   };
 }
 let state=null;
+let _pushTimer=null; // 云同步防抖定时器（提前声明，避免初始化时 TDZ 报错）
 function load(){
   try{const raw=localStorage.getItem(KEY);if(raw){const d=JSON.parse(raw);if(d&&d.version===2){state=d;return;}}}catch(e){}
   state=defaultData();save();
 }
-function save(){try{localStorage.setItem(KEY,JSON.stringify(state));}catch(e){toast('存储失败：空间不足');}scheduleCloudPush();}
+function save(){try{localStorage.setItem(KEY,JSON.stringify(state));}catch(e){toast('存储失败：空间不足');}if(typeof scheduleCloudPush==='function')scheduleCloudPush();}
 
 /* ================= 侧边栏 & 路由 ================= */
 const NAV=[
@@ -928,7 +929,6 @@ function mergeData(cur,incoming){
 }
 
 /* Gitee 云同步 */
-let _pushTimer=null;
 function scheduleCloudPush(){
   clearTimeout(_pushTimer);
   _pushTimer=setTimeout(()=>{
