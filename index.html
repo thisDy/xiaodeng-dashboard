@@ -288,6 +288,16 @@ label.lbl{display:block;font-size:11.5px;color:var(--ink-sub);margin:10px 0 5px}
     </div>
 
     <div class="sync-opt">
+      <b>🔧 数据修复（乱码清理）</b>
+      <p>如果发现中文显示乱码（如 Ã¥ãä½ 或 ç¡è§ 样式的符号），点这个按钮会自动扫描并修复本地数据里的乱码。</p>
+      <div class="row">
+        <button class="btn btn-danger" onclick="repairData()">🔧 一键修复乱码数据</button>
+        <button class="btn btn-soft" onclick="clearLocalData()">🗑 清空本地数据（重来）</button>
+      </div>
+      <div class="sync-status" id="repairStatus"></div>
+    </div>
+
+    <div class="sync-opt">
       <b>☁️ 自动云同步（已为你建好私有仓库，只差填 token）</b>
       <p>我已在你 Gitee 账号下创建好私有仓库 <code>githubthisDy/xiaodeng-dashboard-sync</code>。填入你的 Gitee 私人令牌并点「保存」，手机和电脑打开页面就会自动读写同一份云端数据，实现无感同步。</p>
       <div class="row">
@@ -1048,6 +1058,61 @@ function testGitee(showSave){
     .catch(e=>syncStatus('网络错误：'+e.message,true));
 }
 function clearGitee(){localStorage.removeItem(SYNC_KEY);syncStatus('已移除云同步配置',false);}
+
+/* ===== 乱码修复 ===== */
+function fixMojibake(s){
+  if(typeof s!=='string'||!s)return s;
+  // 已是正常中文则不处理
+  if(/[一-鿿]/.test(s))return s;
+  // 检测是否有 mojibake 常见字符（Latin-1 区，来自 UTF-8 双编码）
+  let suspicious=false;
+  for(let i=0;i<s.length;i++){
+    const c=s.charCodeAt(i);
+    if(c>=0xC0&&c<=0xFF){suspicious=true;break;}
+  }
+  if(!suspicious)return s;
+  try{
+    const bytes=new Uint8Array(s.length);
+    for(let i=0;i<s.length;i++)bytes[i]=s.charCodeAt(i)&0xFF;
+    const fixed=new TextDecoder('utf-8').decode(bytes);
+    // 修复后必须含 CJK 且无替换字符才算成功
+    if(fixed.indexOf('�')>=0||!/[一-鿿]/.test(fixed))return s;
+    return fixed;
+  }catch(e){return s;}
+}
+function walkFix(obj){
+  if(Array.isArray(obj))return obj.map(walkFix);
+  if(obj&&typeof obj==='object'){
+    const o={};
+    for(const k in obj)o[k]=walkFix(obj[k]);
+    return o;
+  }
+  if(typeof obj==='string')return fixMojibake(obj);
+  return obj;
+}
+function repairData(){
+  try{
+    const before=JSON.stringify(state);
+    state=walkFix(state);
+    save();
+    const after=JSON.stringify(state);
+    const fixedCount=(before!==after)?'已修复，请刷新查看':'未检测到乱码';
+    const el=$('#repairStatus');
+    el.style.display='block';el.classList.remove('err');
+    el.textContent='🔧 '+(before!==after?'已修复 '+Math.max(0,(before.split('Ã').length-1))+' 处乱码，页面已刷新':'未检测到乱码数据');
+    render();
+    toast(before!==after?'已修复乱码数据 ✔':'未发现乱码');
+  }catch(e){
+    const el=$('#repairStatus');el.style.display='block';el.classList.add('err');
+    el.textContent='修复失败：'+e.message;
+  }
+}
+function clearLocalData(){
+  if(!confirm('确定清空本设备的所有数据吗？此操作不可恢复。'))return;
+  localStorage.removeItem(KEY);localStorage.removeItem(SYNC_KEY);localStorage.removeItem(TITLE_KEY);
+  state=defaultData();save();render();
+  toast('本地数据已清空，重新开始');
+}
 
 /* 自动云同步：页面加载时拉取远端数据合并到本地 */
 function autoCloudSync(){
