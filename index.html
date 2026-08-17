@@ -109,9 +109,11 @@ label.lbl{display:block;font-size:11.5px;color:var(--ink-sub);margin:10px 0 5px}
 .tl-edit-panel.show{display:flex}
 .tl-edit-box{width:420px;max-width:92vw;background:var(--panel);border-radius:var(--radius);padding:22px;box-shadow:0 10px 40px rgba(0,0,0,.25)}
 .swatch-row{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}
-.swatch{width:34px;height:34px;border-radius:9px;cursor:pointer;border:2px solid transparent;display:flex;align-items:center;justify-content:center;font-size:13px;transition:.12s}
-.swatch:hover{transform:scale(1.12)}
+.swatch{min-width:52px;height:34px;padding:0 12px;border-radius:9px;cursor:pointer;border:2px solid transparent;display:inline-flex;align-items:center;justify-content:center;gap:6px;font-size:12px;font-weight:600;color:#3c4534;transition:.12s;user-select:none}
+.swatch .swatch-dot{width:12px;height:12px;border-radius:50%;flex-shrink:0;border:1px solid rgba(0,0,0,.15)}
+.swatch:hover{transform:scale(1.05)}
 .swatch.sel{border-color:var(--ink);box-shadow:0 0 0 2px #fff inset}
+.swatch.empty-swatch{background:#eee7d8;border-color:#cfc7b4;color:var(--ink-sub)}
 .legend{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:12px}
 .legend .lg{display:flex;align-items:center;gap:6px;font-size:11.5px;color:var(--ink-sub);background:var(--panel-soft);padding:4px 10px;border-radius:999px;border:1px solid var(--line-soft)}
 .legend .lg i{width:11px;height:11px;border-radius:4px;display:inline-block}
@@ -254,12 +256,11 @@ label.lbl{display:block;font-size:11.5px;color:var(--ink-sub);margin:10px 0 5px}
 </div>
 <div class="tl-edit-panel" id="tlPanel">
   <div class="tl-edit-box">
-    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+    <div style="display:flex;align-items:center;margin-bottom:14px">
       <b id="tlEditTitle" style="font-size:15px"></b>
-      <button class="btn btn-soft btn-sm" onclick="closeTLPanel()">✕</button>
     </div>
     <input class="input" id="tlText" placeholder="这个时间段我做了什么…">
-    <label class="lbl">选择色块（可留空表示无分类）</label>
+    <label class="lbl">选择分类（可留空表示不分类）</label>
     <div class="swatch-row" id="tlSwatches"></div>
     <div class="flex mt-14" style="justify-content:flex-end;gap:8px">
       <button class="btn btn-soft" onclick="closeTLPanel()">取消</button>
@@ -607,8 +608,9 @@ function openTLEdit(hour){
 }
 function renderSwatches(sel){
   $('#tlSwatches').innerHTML=(state.timeline.blocks||[]).map(b=>
-    '<div class="swatch'+(sel===b.id?' sel':'')+'" style="background:'+b.color+'" onclick="pickSwatch(\''+b.id+'\')" title="'+esc(b.name)+'">'+(sel===b.id?'✓':'')+'</div>'
-  ).join('')+'<div class="swatch'+(sel===''?' sel':'')+'" style="background:#eee7d8;border-color:#cfc7b4" onclick="pickSwatch(\'\')" title="不分类">'+(sel===''?'✓':'')+'</div>';
+    '<div class="swatch'+(sel===b.id?' sel':'')+'" style="background:'+b.color+'" onclick="pickSwatch(\''+b.id+'\')">'
+    +'<span class="swatch-dot" style="background:'+b.color+';border-color:rgba(0,0,0,.25)"></span>'+esc(b.name)+'</div>'
+  ).join('')+'<div class="swatch empty-swatch'+(sel===''?' sel':'')+'" onclick="pickSwatch(\'\')"><span class="swatch-dot" style="background:#ddd6c8"></span>不分类</div>';
 }
 function pickSwatch(id){pickedBlock=id;renderSwatches(id);}
 function saveTLCell(){
@@ -623,6 +625,11 @@ function saveTLCell(){
   save();closeTLPanel();render();
 }
 function closeTLPanel(){$('#tlPanel').classList.remove('show');}
+/* 点击遮罩空白处关闭弹窗 */
+document.addEventListener('click',e=>{
+  const p=$('#tlPanel');
+  if(p&&p.classList.contains('show')&&e.target===p)closeTLPanel();
+});
 function manageBlocks(){
   const blocks=state.timeline.blocks||[];
   const rows=blocks.map(b=>'<div class="flex mb-10">'
