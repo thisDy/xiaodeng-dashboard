@@ -989,7 +989,7 @@ function scheduleCloudPush(){
       .then(j=>{
         if(j&&j.content&&j.sha){
           let remote;
-          try{remote=JSON.parse(atob(j.content));}catch(e){remote=null;}
+          try{remote=JSON.parse(decodeBase64Utf8(j.content));}catch(e){remote=null;}
           if(remote){
             // 以本地为基准合并远端（本地刚改过），保留两边数据
             const merged=mergeData(state,remote&&remote.data||remote);
@@ -1012,6 +1012,10 @@ function saveGiteeConfig(){
   testGitee(true);
 }
 /* Gitee API 统一封装：token 用 Authorization 请求头（URL 参数会被反爬拦截返回 HTML） */
+function decodeBase64Utf8(b64){
+  // btoa(unescape(encodeURIComponent(x))) 写入，读取须用 decodeURIComponent(escape()) 还原 UTF-8
+  try{return decodeURIComponent(escape(atob(b64)));}catch(e){return atob(b64);}
+}
 function giteeFetch(method,url,token,body){
   const opts={method:method||'GET',headers:{'Authorization':'token '+(token||''),'Accept':'application/json'}};
   if(body){opts.headers['Content-Type']='application/json';opts.body=JSON.stringify(body);}
@@ -1053,7 +1057,7 @@ function autoCloudSync(){
     .then(j=>{
       if(j&&j.content&&j.sha){
         let remote;
-        try{remote=JSON.parse(atob(j.content));}catch(e){return;}
+        try{remote=JSON.parse(decodeBase64Utf8(j.content));}catch(e){return;}
         const merged=mergeData(state,remote&&remote.data||remote);
         state=merged;saveLocal();render();
         // 回写合并结果，保证两端一致
