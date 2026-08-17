@@ -879,6 +879,8 @@ function setSyncCfg(c){localStorage.setItem(SYNC_KEY,JSON.stringify(c));}
 function giteeToken(){return syncCfg().token||'';}
 function giteeRepo(){return syncCfg().repo||'';}
 function giteeBase(){const r=giteeRepo().trim().replace(/^https?:\/\/gitee\.com\//,'').replace(/\.git$/,'');return r;}
+/* repo 逐段编码：保留 / 分隔符（encodeURIComponent 会把 / 变 %2F 导致 Gitee 404） */
+function encodeRepo(repo){return String(repo||'').split('/').map(encodeURIComponent).join('/');}
 function syncStatus(msg,isErr){
   const el=$('#giteeStatus');
   el.style.display='block';el.classList.toggle('err',!!isErr);
@@ -983,7 +985,7 @@ function scheduleCloudPush(){
     const token=giteeToken(),repo=giteeBase();
     if(!token||!repo)return;
     // 推送前先拉最新远端数据合并，避免覆盖对方设备的新记录
-    giteeFetch('GET','https://gitee.com/api/v5/repos/'+encodeURIComponent(repo)+'/contents/xiaodeng-data.json',token)
+    giteeFetch('GET','https://gitee.com/api/v5/repos/'+encodeRepo(repo)+'/contents/xiaodeng-data.json',token)
       .then(j=>{
         if(j&&j.content&&j.sha){
           let remote;
@@ -1023,7 +1025,7 @@ function testGitee(showSave){
   const token=giteeToken(),repo=giteeBase();
   if(!token||!repo){syncStatus('未配置，请先填写并保存',true);return;}
   syncStatus('正在连接…');
-  giteeFetch('GET','https://gitee.com/api/v5/repos/'+encodeURIComponent(repo)+'/contents/xiaodeng-data.json',token)
+  giteeFetch('GET','https://gitee.com/api/v5/repos/'+encodeRepo(repo)+'/contents/xiaodeng-data.json',token)
     .then(j=>{
       if(j&&j.content){
         syncStatus('连接成功！云端已有数据，页面会自动合并同步',false);
@@ -1047,7 +1049,7 @@ function clearGitee(){localStorage.removeItem(SYNC_KEY);syncStatus('已移除云
 function autoCloudSync(){
   const token=giteeToken(),repo=giteeBase();
   if(!token||!repo)return;
-  giteeFetch('GET','https://gitee.com/api/v5/repos/'+encodeURIComponent(repo)+'/contents/xiaodeng-data.json',token)
+  giteeFetch('GET','https://gitee.com/api/v5/repos/'+encodeRepo(repo)+'/contents/xiaodeng-data.json',token)
     .then(j=>{
       if(j&&j.content&&j.sha){
         let remote;
@@ -1065,7 +1067,7 @@ function pushToGitee(sha,silent){
   const content=JSON.stringify({app:'xiaodeng_dashboard',ver:1,updated:Date.now(),data:state});
   const body={content:btoa(unescape(encodeURIComponent(content))),message:'sync '+new Date().toISOString()};
   if(sha)body.sha=sha;
-  giteeFetch(sha?'PUT':'POST','https://gitee.com/api/v5/repos/'+encodeURIComponent(repo)+'/contents/xiaodeng-data.json',token,body)
+  giteeFetch(sha?'PUT':'POST','https://gitee.com/api/v5/repos/'+encodeRepo(repo)+'/contents/xiaodeng-data.json',token,body)
     .then(j=>{
       if(!silent&&j&&j.content)syncStatus('已同步到云端 ✔',false);
     }).catch(()=>{});
