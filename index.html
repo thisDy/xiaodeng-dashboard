@@ -1001,9 +1001,10 @@ function scheduleCloudPush(){
           let remote;
           try{remote=JSON.parse(decodeBase64Utf8(j.content));}catch(e){remote=null;}
           if(remote){
-            // 以本地为基准合并远端（本地刚改过），保留两边数据
-            const merged=mergeData(state,remote&&remote.data||remote);
-            state=merged;saveLocal();
+            // 以本地为基准合并远端（本地刚改过），保留两边数据；先清理远端乱码
+            const cleanRemote=walkFix(remote&&remote.data||remote);
+            const merged=mergeData(state,cleanRemote);
+            state=walkFix(merged);saveLocal();
           }
           pushToGitee(j.sha,true);
         }else{
@@ -1062,7 +1063,7 @@ function clearGitee(){localStorage.removeItem(SYNC_KEY);syncStatus('已移除云
 /* ===== 乱码修复 ===== */
 function fixMojibake(s){
   if(typeof s!=='string'||!s)return s;
-  // 已是正常中文则不处理
+  // 已是正常中文则直接返回
   if(/[一-鿿]/.test(s))return s;
   // 检测是否有 mojibake 常见字符（Latin-1 区，来自 UTF-8 双编码）
   let suspicious=false;
@@ -1072,12 +1073,19 @@ function fixMojibake(s){
   }
   if(!suspicious)return s;
   try{
-    const bytes=new Uint8Array(s.length);
-    for(let i=0;i<s.length;i++)bytes[i]=s.charCodeAt(i)&0xFF;
-    const fixed=new TextDecoder('utf-8').decode(bytes);
-    // 修复后必须含 CJK 且无替换字符才算成功
-    if(fixed.indexOf('�')>=0||!/[一-鿿]/.test(fixed))return s;
-    return fixed;
+    // 循环修复，直到结果稳定（可能有多重编码）
+    let cur=s;
+    let best=s;
+    for(let round=0;round<5;round++){
+      const bytes=new Uint8Array(cur.length);
+      for(let i=0;i<cur.length;i++)bytes[i]=cur.charCodeAt(i)&0xFF;
+      const fixed=new TextDecoder('utf-8',{fatal:false}).decode(bytes);
+      if(fixed.indexOf('�')>=0)break; // 出现替换字符，停止
+      if(fixed===cur)break; // 稳定
+      cur=fixed;
+      if(/[一-鿿]/.test(fixed))best=fixed; // 记录含 CJK 的最佳结果
+    }
+    return best;
   }catch(e){return s;}
 }
 function walkFix(obj){
@@ -1123,9 +1131,11 @@ function autoCloudSync(){
       if(j&&j.content&&j.sha){
         let remote;
         try{remote=JSON.parse(decodeBase64Utf8(j.content));}catch(e){return;}
-        const merged=mergeData(state,remote&&remote.data||remote);
-        state=merged;saveLocal();render();
-        // 回写合并结果，保证两端一致
+        // 修复远端乱码数据（旧版代码可能推过乱码）
+        const cleanRemote=walkFix(remote&&remote.data||remote);
+        const merged=mergeData(state,cleanRemote);
+        state=walkFix(merged);saveLocal();render();
+        // 回写合并结果（已清理乱码），保证两端一致
         pushToGitee(j.sha,true);
       }
     }).catch(()=>{});
@@ -1133,7 +1143,10 @@ function autoCloudSync(){
 function pushToGitee(sha,silent){
   const token=giteeToken(),repo=giteeBase();
   if(!token||!repo)return;
-  const content=JSON.stringify({app:'xiaodeng_dashboard',ver:1,updated:Date.now(),data:state});
+  // 写入云端前统一清理乱码，确保云端永远是干净数据
+  const cleanState=walkFix(state);
+  if(JSON.stringify(cleanState)!==JSON.stringify(state)){state=cleanState;saveLocal();}
+  const content=JSON.stringify({app:'xiaodeng_dashboard',ver:1,updated:Date.now(),data:cleanState});
   const body={content:btoa(unescape(encodeURIComponent(content))),message:'sync '+new Date().toISOString()};
   if(sha)body.sha=sha;
   giteeFetch(sha?'PUT':'POST','https://gitee.com/api/v5/repos/'+encodeRepo(repo)+'/contents/xiaodeng-data.json',token,body)
