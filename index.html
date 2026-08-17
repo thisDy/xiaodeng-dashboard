@@ -44,6 +44,8 @@ input,textarea,select{font-family:var(--font);color:var(--ink)}
 .side-item .ico{font-size:14px;width:20px;text-align:center;opacity:.85}
 
 #main{flex:1;padding:22px 26px 60px;min-width:0}
+#menuBtn{display:none}
+#mask{display:none}
 #topbar{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:20px;flex-wrap:wrap}
 #topbar .crumb{font-size:13px;color:var(--ink-sub)}
 #topbar .crumb b{color:var(--ink)}
@@ -83,7 +85,7 @@ label.lbl{display:block;font-size:11.5px;color:var(--ink-sub);margin:10px 0 5px}
 .todo-check{width:17px;height:17px;border-radius:50%;border:2px solid var(--ink-faint);flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:10px;color:#fff;transition:.15s;cursor:pointer}
 .todo-item.done .todo-check{background:var(--green);border-color:var(--green)}
 .todo-item.done .todo-text{color:var(--ink-faint);text-decoration:line-through;text-decoration-thickness:1.5px}
-.todo-text{flex:1;font-size:13px;line-height:1.5;word-break:break-all}
+.todo-text{flex:1;font-size:13px;line-height:1.5;word-break:break-word;overflow-wrap:anywhere;white-space:normal}
 .todo-del{color:var(--ink-faint);font-size:13px;padding:2px 6px;border-radius:6px}
 .todo-del:hover{color:var(--danger);background:var(--danger-bg)}
 .todo-date{font-size:10.5px;color:var(--ink-faint);white-space:nowrap}
@@ -188,21 +190,49 @@ label.lbl{display:block;font-size:11.5px;color:var(--ink-sub);margin:10px 0 5px}
 .flex{display:flex;align-items:center;gap:8px}
 .flex-between{display:flex;align-items:center;justify-content:space-between}
 @media(max-width:760px){
-  #sidebar{width:150px;min-width:150px}
-  .brand h1{font-size:15px}
-  #main{padding:16px 14px 50px;min-width:0}
+  /* 侧边栏改为抽屉式 */
+  #menuBtn{display:flex;align-items:center;justify-content:center;position:fixed;top:12px;left:12px;z-index:90;width:40px;height:40px;border-radius:12px;background:var(--panel);border:1px solid var(--line);font-size:20px;color:var(--ink);box-shadow:var(--shadow-sm)}
+  #sidebar{position:fixed;left:0;top:0;width:230px;min-width:230px;height:100vh;z-index:100;transform:translateX(-100%);transition:transform .25s ease;box-shadow:none}
+  #sidebar.open{transform:translateX(0);box-shadow:0 0 40px rgba(0,0,0,.3)}
+  #mask{display:block;position:fixed;inset:0;background:rgba(70,60,40,.4);z-index:95;opacity:0;pointer-events:none;transition:opacity .25s}
+  #mask.show{opacity:1;pointer-events:auto}
+  .brand h1{font-size:17px}
+  #main{padding:12px 12px 60px;min-width:0}
   #main .grid-2{grid-template-columns:1fr}
   #main .grid-3{grid-template-columns:1fr}
   #main .card{min-width:0}
+  /* 顶栏：单行，日期缩短不换行 */
+  #topbar{gap:8px;margin-bottom:14px;align-items:flex-start}
+  #topbar .crumb{font-size:13px;line-height:1.4}
+  #topbar-right{gap:6px}
+  #today{font-size:11px;padding:6px 10px;white-space:nowrap}
+  #syncBtn{padding:6px 12px;font-size:12px;white-space:nowrap}
+  /* 按钮文字不截断 */
+  .btn{white-space:nowrap;flex-shrink:0}
+  .btn-primary,.btn-blue{padding:7px 13px}
+  /* todo 文字横向正常换行 */
+  .todo-text{word-break:break-word;overflow-wrap:anywhere}
+  .todo-item{gap:8px;padding:9px 10px}
+  .todo-date{white-space:nowrap}
+  /* 卡片标题 */
+  .card .card-title{font-size:15px;flex-wrap:wrap}
+  .card .card-title .hint{margin-left:0;width:100%}
   .ov-card .ov-num{font-size:20px}
   .pos-table{font-size:11.5px}
   .pos-table th,.pos-table td{padding:5px 4px}
+  /* 输入行不挤压 */
+  .flex{flex-wrap:wrap}
+  .flex > .input{flex:1 1 100%;min-width:0}
   #app{overflow-x:hidden}
+  /* 侧边栏选中高亮增强 */
+  .side-item.active{box-shadow:0 0 0 2px rgba(255,255,255,.25),var(--shadow-sm)}
 }
 </style>
 </head>
 <body>
 <div id="app">
+  <button id="menuBtn" onclick="toggleSidebar()" aria-label="菜单">☰</button>
+  <div id="mask" onclick="closeSidebar()"></div>
   <aside id="sidebar">
     <div class="brand">
       <div class="star">✦ ✧ ✦</div>
@@ -360,11 +390,12 @@ function renderSidebar(){
   });
 }
 function crumbName(id){for(const gr of NAV){const it=gr.items.find(x=>x.id===id);if(it)return gr.group+' · '+it.label;}return '';}
-function go(id){view=id;renderSidebar();render();}
+function go(id){view=id;renderSidebar();render();closeSidebar();toast('已切换到「'+crumbName(id).split('·').pop().trim()+'」');}
 function renderTopbar(){
   const d=new Date();
-  $('#crumb').innerHTML='<span class="crumb">'+esc(getTitle())+' / <b>'+esc(crumbName(view))+'</b></span>';
-  $('#today').innerHTML='🗓 '+d.getFullYear()+'年'+(d.getMonth()+1)+'月'+d.getDate()+'日 星期'+WEEKDAYS[d.getDay()];
+  const label=crumbName(view);
+  $('#crumb').innerHTML='<span class="crumb"><b>'+esc(label.split('·').pop().trim())+'</b></span>';
+  $('#today').innerHTML='🗓 '+(d.getMonth()+1)+'/'+d.getDate()+' 周'+WEEKDAYS[d.getDay()];
 }
 
 /* ================= 通用组件函数 ================= */
@@ -855,6 +886,9 @@ function openSync(){
   $('#syncModal').classList.add('show');
 }
 function closeSync(){$('#syncModal').classList.remove('show');}
+/* 移动端抽屉侧边栏 */
+function toggleSidebar(){const s=$('#sidebar'),m=$('#mask');const open=s.classList.toggle('open');m.classList.toggle('show',open);}
+function closeSidebar(){$('#sidebar').classList.remove('open');$('#mask').classList.remove('show');}
 
 /* 手动导出 */
 function exportData(){
