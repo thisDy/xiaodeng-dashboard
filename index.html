@@ -376,7 +376,7 @@ function load(){
   try{const raw=localStorage.getItem(KEY);if(raw){const d=JSON.parse(raw);if(d&&d.version===2){state=d;return;}}}catch(e){}
   state=defaultData();save();
 }
-function save(){try{localStorage.setItem(KEY,JSON.stringify(state));}catch(e){toast('存储失败：空间不足');}if(typeof scheduleCloudPush==='function')scheduleCloudPush();}
+function save(){try{state._updatedAt=Date.now();localStorage.setItem(KEY,JSON.stringify(state));}catch(e){toast('存储失败：空间不足');}if(typeof scheduleCloudPush==='function')scheduleCloudPush();}
 
 /* ================= 侧边栏 & 路由 ================= */
 const NAV=[
@@ -941,6 +941,16 @@ function handleImportFile(input){
   reader.readAsText(file,'utf-8');
 }
 function mergeData(cur,incoming){
+  // 用更新时间戳决定以哪份为准：删除操作通过时间戳传播，避免被旧数据并集还原
+  // 仅当两边都有 _updatedAt 时才用"较新者优先"；任一边缺失则回退并集（保留两边新增）
+  const curT=cur&&cur._updatedAt?cur._updatedAt:0;
+  const incT=incoming&&incoming._updatedAt?incoming._updatedAt:0;
+  const useNewest=curT>0&&incT>0;
+  if(useNewest){
+    if(incT>curT)return JSON.parse(JSON.stringify(incoming));
+    if(curT>incT)return JSON.parse(JSON.stringify(cur));
+  }
+  // 时间戳相同或缺失：合并两边数据（并集，保留两端新增）
   const out=JSON.parse(JSON.stringify(cur));
   // 深合并数组（去重 by id 或 key），保留两边数据
   const mergeArr=(a,b)=>{const map=new Map(a.map(x=>[x.id,x]));b.forEach(x=>{if(x.id&&map.has(x.id))map.set(x.id,x);else map.set(x.id||JSON.stringify(x),x);});return [...map.values()];};
