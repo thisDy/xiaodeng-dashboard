@@ -1038,12 +1038,37 @@ function decodeBase64Utf8(b64){
   try{return decodeURIComponent(escape(atob(b64)));}catch(e){return atob(b64);}
 }
 function giteeFetch(method,url,token,body){
-  const opts={method:method||'GET',headers:{'Authorization':'token '+(token||''),'Accept':'application/json'}};
+  const opts={method:method||'GET',headers:{
+    'Authorization':'token '+(token||''),
+    'Accept':'application/json,text/plain,*/*',
+    'X-Requested-With':'XMLHttpRequest',
+    'Referer':'https://gitee.com/'
+  }};
   if(body){opts.headers['Content-Type']='application/json';opts.body=JSON.stringify(body);}
-  return fetch(url,opts).then(r=>{
-    const ct=r.headers.get('content-type')||'';
-    if(ct.indexOf('json')>=0)return r.json().then(j=>{j._status=r.status;return j;});
-    return r.text().then(t=>{throw new Error('服务返回异常('+r.status+')，请检查仓库名或网络');});
+  // 15秒超时，避免网络异常时无限等待
+  const ctrl=typeof AbortController!=='undefined'?new AbortController():null;
+  if(ctrl)opts.signal=ctrl.signal;
+  const timer=ctrl?setTimeout(()=>ctrl.abort(),15000):null;
+  return fetch(url,opts).then(async r=>{
+    let text='';
+    try{text=await r.text();}catch(e){if(timer)clearTimeout(timer);throw new Error('网络连接异常，请检查网络后重试');}
+    if(timer)clearTimeout(timer);
+    // 去掉可能的前导 BOM/空字符
+    const trimmed=text.replace(/^﻿/,'').trim();
+    // 检测 HTML 响应（反爬或登录跳转）
+    if(trimmed.slice(0,1)==='<'){
+      throw new Error(r.status===401?'token 无效或已过期，请重新填写令牌':'网络被拦截，请检查 token 是否有效或稍后重试');
+    }
+    let j=null;
+    try{j=JSON.parse(trimmed);}catch(e){
+      throw new Error('服务返回异常('+r.status+')，请确认仓库名正确且网络通畅');
+    }
+    if(j&&typeof j==='object')j._status=r.status;
+    return j;
+  }).catch(e=>{
+    if(timer)clearTimeout(timer);
+    if(e&&e.name==='AbortError')throw new Error('请求超时，请检查网络');
+    throw e;
   });
 }
 function testGitee(showSave){
@@ -1055,7 +1080,7 @@ function testGitee(showSave){
       if(j&&j.content){
         syncStatus('连接成功！云端已有数据，页面会自动合并同步',false);
         if(showSave)setSyncCfg({token,repo});
-      }else if(j&&j.message&&String(j.message).includes('404')){
+      }else if(j&&j.message&&(j._status===404||String(j.message).includes('404'))){
         syncStatus('连接成功！云端暂无数据，首次编辑将自动创建',false);
         if(showSave)setSyncCfg({token,repo});
       }else if(j&&(j._status===401||j._status===403||(j.message&&/认证|验证|auth|invalid|not.*permission/i.test(j.message)))){
