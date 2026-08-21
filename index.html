@@ -377,6 +377,20 @@ function load(){
   state=defaultData();save();
 }
 function save(){try{state._updatedAt=Date.now();localStorage.setItem(KEY,JSON.stringify(state));}catch(e){toast('存储失败：空间不足');}if(typeof scheduleCloudPush==='function')scheduleCloudPush();}
+/* 清理 _deleted 墓碑：在「合并完成后、本地确认删除已传播」时才调用 */
+function purgeDeleted(obj){
+  if(!obj||typeof obj!=='object')return;
+  ['daily','weekly','monthly'].forEach(k=>{if(Array.isArray(obj.dailyPlan&&obj.dailyPlan[k]))obj.dailyPlan[k]=obj.dailyPlan[k].filter(x=>!x._deleted);});
+  if(Array.isArray(obj.workLog))obj.workLog=obj.workLog.filter(x=>!x._deleted);
+  if(obj.career&&Array.isArray(obj.career.questions))obj.career.questions=obj.career.questions.filter(x=>!x._deleted);
+  ['study','hobby','sport'].forEach(k=>{
+    if(Array.isArray(obj[k]))obj[k]=obj[k].filter(t=>{
+      if(t._deleted)return false;
+      if(Array.isArray(t.plans))t.plans=t.plans.filter(p=>!p._deleted);
+      return true;
+    });
+  });
+}
 
 /* ================= 侧边栏 & 路由 ================= */
 const NAV=[
@@ -414,6 +428,7 @@ function card(title,dotColor,bodyHtml,hint){
   return '<div class="card"><div class="card-title"><span class="dot" style="background:'+(dotColor||'var(--green)')+'"></span>'+esc(title)+(hint?'<span class="hint">'+esc(hint)+'</span>':'')+'</div>'+bodyHtml+'</div>';
 }
 function renderTodoList(arr,onToggle,onDel){
+  arr=(arr||[]).filter(x=>!x._deleted);
   if(!arr.length)return '<div class="empty">还没有计划，先添加一条吧～</div>';
   return arr.map(t=>{
     return '<div class="todo-item'+(t.done?' done':'')+'">'
@@ -444,7 +459,7 @@ function checkinBar(arr,curDate,onToggle){
 const THEME_LABEL={study:{title:'学习计划',add:'学习主题'},hobby:{title:'兴趣爱好',add:'兴趣爱好'},sport:{title:'运动打卡',add:'运动主题'}};
 function renderThemeBoard(type){
   const L=THEME_LABEL[type];
-  const list=state[type]||[];
+  const list=live(state[type])||[];
   const h=[];
   h.push(card(L.title,'var(--blue)',
     '<div class="flex mb-10"><input class="input" id="newThemeInput_'+type+'" placeholder="新增'+L.add+'…" style="flex:1" onkeydown="if(event.key===\'Enter\')addTheme(\''+type+'\')">'
@@ -475,16 +490,17 @@ function addTheme(type){
   const v=$('#newThemeInput_'+type).value.trim();if(!v){toast('请输入主题名称');return;}
   state[type].push({id:uid(),name:v,yearGoal:'',monthGoal:'',plans:[],checkins:[]});save();render();
 }
-function delTheme(type,id){state[type]=state[type].filter(t=>t.id!==id);save();render();}
+function delTheme(type,id){const t=state[type].find(x=>x.id===id);if(t){t._deleted=true;t._updatedAt=Date.now();}save();render();}
 function setThemeField(type,id,field,val){const t=state[type].find(x=>x.id===id);if(t){t[field]=val;save();}}
 function toggleThemePlan(type,tid,pid){const t=state[type].find(x=>x.id===tid);if(!t)return;const p=(t.plans||[]).find(x=>x.id===pid);if(p){p.done=!p.done;save();render();}}
-function delThemePlan(type,tid,pid){const t=state[type].find(x=>x.id===tid);if(t){t.plans=t.plans.filter(p=>p.id!==pid);save();render();}}
+function delThemePlan(type,tid,pid){const t=state[type].find(x=>x.id===tid);if(t){const p=(t.plans||[]).find(x=>x.id===pid);if(p){p._deleted=true;p._updatedAt=Date.now();}save();render();}}
 function addThemePlan(type,tid){const t=state[type].find(x=>x.id===tid);if(!t)return;const v=$('#newTodoInput').value.trim();if(!v)return;t.plans.push({id:uid(),text:v,done:false,date:todayStr()});save();render();}
 function toggleCheckin(type,tid,ds){const t=state[type].find(x=>x.id===tid);if(!t)return;const i=t.checkins.indexOf(ds);if(i>=0)t.checkins.splice(i,1);else t.checkins.push(ds);save();render();}
 /*__MORE__*/
 
 /* ================= 1.1 首页总览 ================= */
-function countTodo(arr){return {total:arr.length,done:arr.filter(x=>x.done).length};}
+function countTodo(arr){arr=(arr||[]).filter(x=>!x._deleted);return {total:arr.length,done:arr.filter(x=>x.done).length};}
+function live(arr){return (arr||[]).filter(x=>!x._deleted);}
 function tlMinutes(day){
   const map={};
   (state.timeline.days[day]||[]).forEach(c=>{const k=c.block||'__none__';map[k]=(map[k]||0)+c.min;});
@@ -515,13 +531,16 @@ function renderOverview(){
   const dailyCount=countTodo(state.dailyPlan.daily);
   const weeklyCount=countTodo(state.dailyPlan.weekly);
   const monthlyCount=countTodo(state.dailyPlan.monthly);
-  const workCount=state.workLog.length;
-  const qaCount=state.career.questions.length;
-  const studyTotal=state.study.reduce((a,t)=>a+countTodo(t.plans||[]).total,0);
-  const studyDone=state.study.reduce((a,t)=>a+countTodo(t.plans||[]).done,0);
-  const hobbyCount=state.hobby.length;
-  const sportTotal=state.sport.reduce((a,t)=>a+countTodo(t.plans||[]).total,0);
-  const sportDone=state.sport.reduce((a,t)=>a+countTodo(t.plans||[]).done,0);
+  const workCount=live(state.workLog).length;
+  const qaCount=live(state.career.questions).length;
+  const studyList=live(state.study);
+  const studyTotal=studyList.reduce((a,t)=>a+countTodo(t.plans||[]).total,0);
+  const studyDone=studyList.reduce((a,t)=>a+countTodo(t.plans||[]).done,0);
+  const hobbyList=live(state.hobby);
+  const hobbyCount=hobbyList.length;
+  const sportList=live(state.sport);
+  const sportTotal=sportList.reduce((a,t)=>a+countTodo(t.plans||[]).total,0);
+  const sportDone=sportList.reduce((a,t)=>a+countTodo(t.plans||[]).done,0);
   const todayMins=totalMins(tlMinutes(todayStr()));
   const weekMins=totalMins(computeWeekStats());
   const monthMins=totalMins(computeMonthStats());
@@ -543,14 +562,14 @@ function renderOverview(){
     +'<div class="ov-num">'+workCount+'</div><div class="ov-sub">篇工作复盘 · '+qaCount+' 条职业问题</div>'
     +'<div class="ov-foot">日日精进</div></div>');
   h.push('<div class="card ov-card" onclick="go(\'study\')"><div class="card-title"><span class="dot" style="background:var(--green)"></span>📚 学习</div>'
-    +'<div class="ov-num">'+studyDone+'/'+studyTotal+'</div><div class="ov-sub">'+state.study.length+' 个主题 · 今日计划</div>'
-    +'<div class="ov-foot">'+state.study.map(t=>esc(t.name)).join(' · ')+'</div></div>');
+    +'<div class="ov-num">'+studyDone+'/'+studyTotal+'</div><div class="ov-sub">'+studyList.length+' 个主题 · 今日计划</div>'
+    +'<div class="ov-foot">'+studyList.map(t=>esc(t.name)).join(' · ')+'</div></div>');
   h.push('<div class="card ov-card" onclick="go(\'hobby\')"><div class="card-title"><span class="dot" style="background:var(--yellow)"></span>🎨 兴趣爱好</div>'
     +'<div class="ov-num">'+hobbyCount+'</div><div class="ov-sub">个爱好主题</div>'
-    +'<div class="ov-foot">'+state.hobby.map(t=>esc(t.name)).join(' · ')+'</div></div>');
+    +'<div class="ov-foot">'+hobbyList.map(t=>esc(t.name)).join(' · ')+'</div></div>');
   h.push('<div class="card ov-card" onclick="go(\'sport\')"><div class="card-title"><span class="dot" style="background:var(--orange)"></span>🏸 运动</div>'
-    +'<div class="ov-num">'+sportDone+'/'+sportTotal+'</div><div class="ov-sub">今日计划 · '+state.sport.length+' 个运动</div>'
-    +'<div class="ov-foot">'+state.sport.map(t=>esc(t.name)).join(' · ')+'</div></div>');
+    +'<div class="ov-num">'+sportDone+'/'+sportTotal+'</div><div class="ov-sub">今日计划 · '+sportList.length+' 个运动</div>'
+    +'<div class="ov-foot">'+sportList.map(t=>esc(t.name)).join(' · ')+'</div></div>');
   h.push('<div class="card ov-card" onclick="go(\'invest\')"><div class="card-title"><span class="dot" style="background:var(--pink)"></span>📈 投资</div>'
     +'<div class="ov-num">'+inv.positions.length+'</div><div class="ov-sub">只持仓 · '+(inv.pnl?inv.pnl+' 元':'盈亏待填')+'</div>'
     +'<div class="ov-foot">'+(inv.discipline?'交易纪律已设':'交易纪律未设')+' · '+(inv.important?'有重要事项':'无重要事项')+'</div></div>');
@@ -667,7 +686,7 @@ function renderDailyPlan(){
     '<button class="tab'+(planTab===t[0]?' active':'')+'" onclick="setPlanTab(\''+t[0]+'\')">'+t[1]+'</button>').join('');
   const d=new Date();
   const title=planTab==='daily'?'📅 '+todayMD()+' 的日计划':planTab==='weekly'?'🗓 '+(d.getMonth()+1)+'月 第 '+Math.ceil(d.getDate()/7)+' 周的周计划':'🗓 '+(d.getMonth()+1)+' 月的月计划';
-  const arr=state.dailyPlan[planTab];
+  const arr=state.dailyPlan[planTab].filter(x=>!x._deleted);
   $('#content').innerHTML=card('每日计划','var(--blue)',
     '<div class="tabs">'+tabs+'</div>'
     +'<div class="card" style="box-shadow:none;margin:0"><div class="card-title"><span class="dot" style="background:var(--blue)"></span>'+title+'</div>'
@@ -677,12 +696,12 @@ function renderDailyPlan(){
 }
 function setPlanTab(t){planTab=t;renderDailyPlan();}
 function togglePlanItem(id){const p=state.dailyPlan[planTab].find(x=>x.id===id);if(p){p.done=!p.done;save();renderDailyPlan();}}
-function delPlanItem(id){state.dailyPlan[planTab]=state.dailyPlan[planTab].filter(x=>x.id!==id);save();renderDailyPlan();}
+function delPlanItem(id){const arr=state.dailyPlan[planTab];const idx=arr.findIndex(x=>x.id===id);if(idx>=0){arr[idx]._deleted=true;arr[idx]._updatedAt=Date.now();}save();renderDailyPlan();}
 function addPlanItem(){const v=$('#newTodoInput').value.trim();if(!v)return;state.dailyPlan[planTab].push({id:uid(),text:v,done:false,date:todayStr()});save();renderDailyPlan();}
 
 /* ================= 2.1 工作复盘 ================= */
 function renderWorkLog(){
-  const logs=[...state.workLog].sort((a,b)=>b.date.localeCompare(a.date));
+  const logs=live(state.workLog).sort((a,b)=>b.date.localeCompare(a.date));
   const h=[card('工作复盘','var(--purple)',
     '<div class="flex"><input class="input" id="newLogDate" type="date" value="'+todayStr()+'" style="width:160px">'
     +'<button class="btn btn-primary" onclick="addWorkLog()">＋ 记录今日</button></div>'
@@ -723,11 +742,11 @@ function saveWorkLog(){
   editingLogId=null;save();renderWorkLog();
 }
 function cancelWorkLog(){editingLogId=null;$('#logEditor').innerHTML='';}
-function delWorkLog(id){state.workLog=state.workLog.filter(x=>x.id!==id);save();renderWorkLog();}
+function delWorkLog(id){const idx=state.workLog.findIndex(x=>x.id===id);if(idx>=0){state.workLog[idx]._deleted=true;state.workLog[idx]._updatedAt=Date.now();}save();renderWorkLog();}
 
 /* ================= 2.2 职业发展 ================= */
 function renderCareer(){
-  const qs=state.career.questions||[];
+  const qs=live(state.career.questions)||[];
   const h=[card('职业发展 · 经验与疑问','var(--green)',
     '<div class="flex"><input class="input" id="newQInput" placeholder="记录一个工作中的问题 / 经验 / 灵感…" style="flex:1" onkeydown="if(event.key===\'Enter\')addQuestion()">'
     +'<button class="btn btn-primary" onclick="addQuestion()">＋ 提问</button></div>'
@@ -766,12 +785,12 @@ function addAnswerFromInput(btn){
   addAnswer((()=>{const item=btn.closest('.qa-a-area');return item.parentElement.id.replace('qa_','');})(),inp.value);
 }
 function delAnswer(qid,idx){const q=state.career.questions.find(x=>x.id===qid);if(q){q.answers.splice(idx,1);save();renderCareer();}}
-function delQuestion(qid){state.career.questions=state.career.questions.filter(x=>x.id!==qid);save();renderCareer();}
+function delQuestion(qid){const q=state.career.questions.find(x=>x.id===qid);if(q){q._deleted=true;q._updatedAt=Date.now();}save();renderCareer();}
 
 /* ================= 3.1 投资复盘 ================= */
 function renderInvest(){
   const inv=state.invest;
-  const positions=inv.positions||[];
+  const positions=live(inv.positions)||[];
   const posRows=positions.map((p,i)=>'<tr>'
     +'<td><input value="'+esc(p.name)+'" onchange="updPos('+i+',\'name\',this.value)"></td>'
     +'<td><input type="number" step="0.01" value="'+p.qty+'" onchange="updPos('+i+',\'qty\',this.value)"></td>'
@@ -820,14 +839,14 @@ function posPnlHtml(p){const c=(p.qty||0)*(p.price||0);const n=(p.qty||0)*(p.now
 function invField(field,val){state.invest[field]=val;save();}
 function addPos(){state.invest.positions.push({name:'',qty:0,price:0,now:0});save();renderInvest();}
 function updPos(i,field,val){const p=state.invest.positions[i];if(!p)return;p[field]=field==='name'?val:parseFloat(val)||0;save();renderInvest();}
-function delPos(i){state.invest.positions.splice(i,1);save();renderInvest();}
+function delPos(i){const p=state.invest.positions[i];if(p){p._deleted=true;p._updatedAt=Date.now();}save();renderInvest();}
 async function runMarketAnalysis(){
   const btn=document.activeElement;if(btn)btn.disabled=true;
   const news=(state.invest.marketNews||'').trim();
   if(!news){toast('请先粘贴美股新闻再分析');if(btn)btn.disabled=false;return;}
   toast('正在生成分析…');
   try{
-    const posDesc=(state.invest.positions||[]).filter(p=>p.name).map(p=>p.name+' 持仓'+(p.qty||0)+'股 成本'+(p.price||0)+' 现价'+(p.now||0)).join('；')||'暂无持仓';
+    const posDesc=live(state.invest.positions).filter(p=>p.name).map(p=>p.name+' 持仓'+(p.qty||0)+'股 成本'+(p.price||0)+' 现价'+(p.now||0)).join('；')||'暂无持仓';
     const resp=await fetch('https://api.360.cn/nm/search',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({query:'根据以下美股信息给出投资分析：新闻：'+news.slice(0,800)+'；我的持仓：'+posDesc,count:1})}).catch(()=>null);
     let text='';
     if(resp&&resp.ok){const j=await resp.json();text=(j.data&&(j.data.answer||j.data.text||j.data.result))||'';}
@@ -941,19 +960,31 @@ function handleImportFile(input){
   reader.readAsText(file,'utf-8');
 }
 function mergeData(cur,incoming){
-  // 用更新时间戳决定以哪份为准：删除操作通过时间戳传播，避免被旧数据并集还原
-  // 仅当两边都有 _updatedAt 时才用"较新者优先"；任一边缺失则回退并集（保留两边新增）
-  const curT=cur&&cur._updatedAt?cur._updatedAt:0;
-  const incT=incoming&&incoming._updatedAt?incoming._updatedAt:0;
-  const useNewest=curT>0&&incT>0;
-  if(useNewest){
-    if(incT>curT)return JSON.parse(JSON.stringify(incoming));
-    if(curT>incT)return JSON.parse(JSON.stringify(cur));
-  }
-  // 时间戳相同或缺失：合并两边数据（并集，保留两端新增）
+  // 多设备同步：字段级并集合并，保留两端各自新增/修改
+  // 删除用显式墓碑(_deleted)传播：合并时所有 _deleted 项被剔除
+  // 同 ID 记录取 _updatedAt 更新的一份（无项级时间戳则保留本地值）
+  const curT=cur&&cur._updatedAt||0;
+  const incT=incoming&&incoming._updatedAt||0;
   const out=JSON.parse(JSON.stringify(cur));
-  // 深合并数组（去重 by id 或 key），保留两边数据
-  const mergeArr=(a,b)=>{const map=new Map(a.map(x=>[x.id,x]));b.forEach(x=>{if(x.id&&map.has(x.id))map.set(x.id,x);else map.set(x.id||JSON.stringify(x),x);});return [...map.values()];};
+  const alive=arr=>(arr||[]).filter(x=>!x._deleted);
+  const mergeArr=(a,b)=>{
+    // 墓碑收集：任何一边标记 _deleted 的 ID → 合并结果中必须剔除（删除传播优先）
+    const deletedIds=new Set();
+    (a||[]).forEach(x=>{if(x&&x._deleted&&x.id!=null)deletedIds.add(x.id);});
+    (b||[]).forEach(x=>{if(x&&x._deleted&&x.id!=null)deletedIds.add(x.id);});
+    const map=new Map();
+    (a||[]).forEach(x=>{if(!x||x._deleted)return;if(deletedIds.has(x.id))return;if(x.id!=null)map.set(x.id,JSON.parse(JSON.stringify(x)));});
+    (b||[]).forEach(x=>{
+      if(!x||x._deleted)return;if(deletedIds.has(x.id))return;
+      if(x.id==null){map.set('k'+String(x.text||x.name||'')+String(x.id||''),JSON.parse(JSON.stringify(x)));return;}
+      const exist=map.get(x.id);
+      if(!exist){map.set(x.id,JSON.parse(JSON.stringify(x)));}
+      else{
+        const et=exist._updatedAt||0,bt=x._updatedAt||0;
+        if(bt>et)map.set(x.id,JSON.parse(JSON.stringify(x)));
+      }
+    });
+    return [...map.values()];};
   // timeline.days: 按天合并格子
   out.timeline=out.timeline||{days:{},blocks:[]};
   out.timeline.days=out.timeline.days||{};
@@ -977,18 +1008,24 @@ function mergeData(cur,incoming){
   });
   // 学习/兴趣/运动 主题（合并 plans 与 checkins）
   ['study','hobby','sport'].forEach(k=>{
-    const inc=incoming[k]||[];
-    const curArr=out[k]||[];
-    const curMap=new Map(curArr.map(t=>[t.id,t]));
-    inc.forEach(t=>{
+    const inc=alive(incoming[k]);
+    const curArr=alive(out[k]);
+    // 墓碑：任一边 _deleted 的主题 ID 一律剔除
+    const delIds=new Set();
+    (((cur&&cur[k])||[]).concat((incoming[k])||[])).forEach(x=>{if(x&&x._deleted&&x.id!=null)delIds.add(x.id);});
+    const curMap=new Map(curArr.filter(t=>!delIds.has(t.id)).map(t=>[t.id,JSON.parse(JSON.stringify(t))]));
+    alive(inc).filter(t=>!delIds.has(t.id)).forEach(t=>{
       const exist=curMap.get(t.id);
       if(exist){
-        // 已存在：合并字段
-        exist.yearGoal=t.yearGoal||exist.yearGoal;
-        exist.monthGoal=t.monthGoal||exist.monthGoal;
-        exist.name=t.name||exist.name;
+        // 同ID取较新者的字段；plans/checkins 并集
+        const et=exist._updatedAt||0,bt=t._updatedAt||0;
+        const src=bt>et?t:exist;
+        exist.yearGoal=src.yearGoal||exist.yearGoal;
+        exist.monthGoal=src.monthGoal||exist.monthGoal;
+        exist.name=src.name||exist.name;
         exist.plans=mergeArr(exist.plans||[],t.plans||[]);
         exist.checkins=[...new Set([...(exist.checkins||[]),...(t.checkins||[])])];
+        if(bt>et)exist._updatedAt=t._updatedAt;
       }else{
         curMap.set(t.id,JSON.parse(JSON.stringify(t)));
       }
@@ -1014,6 +1051,7 @@ function scheduleCloudPush(){
             // 以本地为基准合并远端（本地刚改过），保留两边数据；先清理远端乱码
             const cleanRemote=walkFix(remote&&remote.data||remote);
             const merged=mergeData(state,cleanRemote);
+            merged._updatedAt=Math.max(state._updatedAt||0,cleanRemote._updatedAt||0);
             state=walkFix(merged);saveLocal();
           }
           pushToGitee(j.sha,true);
@@ -1169,6 +1207,8 @@ function autoCloudSync(){
         // 修复远端乱码数据（旧版代码可能推过乱码）
         const cleanRemote=walkFix(remote&&remote.data||remote);
         const merged=mergeData(state,cleanRemote);
+        // 合并后更新时间戳为两端较新者（避免陈旧时间戳导致后续误判）
+        merged._updatedAt=Math.max(state._updatedAt||0,cleanRemote._updatedAt||0);
         state=walkFix(merged);saveLocal();render();
         // 回写合并结果（已清理乱码），保证两端一致
         pushToGitee(j.sha,true);
